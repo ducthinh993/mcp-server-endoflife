@@ -15,9 +15,10 @@
     "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
     "prepare": "npm run build",
     "watch": "tsc --watch",
+    "lint": "eslint . --ext .ts",
     "inspector": "npx @modelcontextprotocol/inspector build/index.js",
     "security-scan": "npm audit && snyk test",
-    "lint:security": "eslint . --config .eslintrc.security.js",
+    "lint:security": "eslint . --config .eslintrc.security.cjs",
     "precommit": "npm run lint && npm run security-scan"
   },
   "dependencies": {
