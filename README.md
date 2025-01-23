@@ -1,6 +1,6 @@
 # EOL MCP Server 📅
 
-A Model Context Protocol (MCP) server that enables AI assistants like Claude to check software end-of-life (EOL) dates and support status using the endoflife.date API. This helps AI models provide accurate information about software lifecycle and support status in real-time.
+A Model Context Protocol (MCP) server that enables AI assistants like Claude to check software end-of-life (EOL) dates and support status using the endoflife.date API. This helps AI models provide accurate information about software lifecycle and security status in real-time.
 
 ## What is MCP? 🤔
 
@@ -9,11 +9,89 @@ The Model Context Protocol (MCP) is a system that lets AI apps, like Claude Desk
 ## What does this server do? 🚀
 
 The EOL MCP server:
-- Enables AI assistants to check software end-of-life dates and support status
-- Provides information about software versions, release dates, and support cycles
-- Supports queries for multiple software products (Python, Node.js, Ubuntu, etc.)
+- Checks software end-of-life dates and support status
+- Scans for CVE vulnerabilities in software versions
+- Provides version comparison and upgrade recommendations
+- Supports natural language queries about software lifecycle
+- Handles multiple software products (Python, Node.js, Ubuntu, etc.)
 - Caches recent queries for quick reference
-- Handles API rate limiting and error cases gracefully
+
+## Features ✨
+
+### 1. EOL Status Checking
+- Get support status for specific versions
+- View end-of-life dates
+- Check LTS (Long Term Support) information
+- Monitor support cycles
+
+### 2. Security Analysis
+- CVE vulnerability scanning
+- Security status assessment
+- CVSS score evaluation
+- Vulnerability type identification
+
+## Tools and Prompts 🛠️
+
+### Available Tools
+
+1. **check_version**
+   - Purpose: Check EOL status for software versions
+   - Example: "Is Python 3.8 still supported?"
+   - Arguments:
+     - product: Software name
+     - version: Version to check
+
+2. **check_cve**
+   - Purpose: Scan for security vulnerabilities
+   - Example: "Are there any CVEs for Node.js 16?"
+   - Arguments:
+     - product: Software name
+     - version: Version to check
+     - vendor: Software vendor (optional)
+
+3. **list_products**
+   - Purpose: Browse available software products
+   - Example: "Show me all Linux distributions"
+   - Arguments:
+     - filter: Optional search term
+
+## Example Conversations 💬
+
+1. Basic Version Check:
+```
+Human: Is Python 3.8 still good to use?
+Claude: Let me check the status of Python 3.8.
+[Uses check_version tool]
+Based on the EOL data, Python 3.8:
+- Security support ends: October 2024
+- Current status: Security fixes only
+Recommendation: Consider upgrading to Python 3.11 for new projects.
+```
+
+2. Security Analysis:
+```
+Human: Any security concerns with Node.js 16?
+Claude: I'll analyze the security status of Node.js 16.
+[Uses check_version tool]
+[Uses check_cve tool]
+Found:
+- Support Status: LTS until September 2023
+- Critical CVEs: 2 in last 6 months
+- CVSS Score Range: 7.5-9.8
+Recommendation: Update to latest 16.x patch or consider Node.js 18 LTS.
+```
+
+3. Version Comparison:
+```
+Human: Which Ubuntu version should I use?
+Claude: I'll help you compare Ubuntu versions.
+[Uses version-comparison prompt]
+Analysis:
+- 22.04 LTS: Supported until 2027, recommended for new deployments
+- 20.04 LTS: Supported until 2025, stable and widely used
+- 18.04 LTS: Approaching EOL, plan migration
+Recommendation: Use 22.04 LTS for best long-term support.
+```
 
 ## Prerequisites 📋
 
@@ -32,8 +110,8 @@ node --version  # Should show v18.0.0 or higher
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/eol-mcp-server.git
-cd eol-mcp-server
+git clone https://github.com/ducthinh993/mcp-server-endoflife
+cd mcp-server-endoflife
 ```
 
 2. Install dependencies:
@@ -85,57 +163,6 @@ For the changes to take effect:
 1. Completely quit Claude Desktop (not just close the window)
 2. Start Claude Desktop again
 3. Look for the 🔌 icon to verify the EOL server is connected
-
-## Using with Claude 🤖
-
-### Available Tools
-
-1. **check_version**
-   - Checks EOL status for a specific software version
-   - Example: "Check if Python 3.8 is still supported"
-
-2. **list_products**
-   - Lists all available products that can be checked
-   - Example: "Show me all available products related to Linux"
-
-### Available Prompts
-
-1. **check-software-status**
-   - Purpose: Check if a software version is still supported
-   - Example: "Use check-software-status to check Node.js 16"
-   - Arguments:
-     - product (required): Software name
-     - version (optional): Specific version
-
-2. **analyze-eol-data**
-   - Purpose: Get comprehensive EOL analysis
-   - Example: "Use analyze-eol-data for Ubuntu with focus on LTS versions"
-   - Arguments:
-     - product (required): Software name
-     - context (optional): Additional analysis context
-
-### Example Conversations
-
-1. Basic Version Check:
-```
-Human: Check if Python 3.8 is still supported
-Claude: Let me check that for you using the EOL MCP server.
-[Claude uses check_version tool]
-```
-
-2. Product Search:
-```
-Human: What versions of Ubuntu can I check?
-Claude: I'll list the available Ubuntu versions.
-[Claude uses list_products tool with filter]
-```
-
-3. Detailed Analysis:
-```
-Human: Analyze Node.js versions and recommend an upgrade path
-Claude: I'll analyze the Node.js lifecycle data.
-[Claude uses analyze-eol-data prompt]
-```
 
 ## Troubleshooting 🔧
 

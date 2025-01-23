@@ -9,7 +9,8 @@ import {
   ListPromptsRequestSchema,
   GetPromptRequestSchema,
   ErrorCode,
-  McpError
+  McpError,
+  ServerOptions
 } from "@modelcontextprotocol/sdk/types.js";
 import axios, { AxiosInstance } from "axios";
 import {
@@ -18,72 +19,134 @@ import {
   CheckVersionArgs,
   isValidCheckVersionArgs,
   CachedQuery,
-  isValidListProductsArgs
+  isValidListProductsArgs,
+  CVECheckArgs,
+  isValidCVECheckArgs,
+  CVEDetails
 } from "./types.js";
 
 const API_CONFIG = {
   BASE_URL: 'https://endoflife.date/api',
+  CVE_BASE_URL: 'https://www.cvedetails.com/json-feed.php',
   MAX_CACHED_QUERIES: 5,
   ENDPOINTS: {
     ALL_PRODUCTS: '/all.json'
   }
 } as const;
 
-const PROMPTS = {
-  "check-software-status": {
-    name: "check-software-status",
-    description: "Check if a software version is still supported or has reached end-of-life",
-    arguments: [
-      {
-        name: "product",
-        description: "Software product name (e.g., python, nodejs, ubuntu)",
-        required: true
-      },
-      {
-        name: "version",
-        description: "Specific version to check",
-        required: false
-      }
-    ]
-  },
-  "analyze-eol-data": {
-    name: "analyze-eol-data",
-    description: "Analyze EOL data and provide recommendations",
-    arguments: [
-      {
-        name: "product",
-        description: "Software product name",
-        required: true
-      },
-      {
-        name: "context",
-        description: "Additional context for analysis",
-        required: false
-      }
-    ]
-  }
-} as const;
-
 class EOLServer {
   private server: Server;
   private axiosInstance: AxiosInstance;
+  private cveAxiosInstance: AxiosInstance;
   private recentQueries: CachedQuery[] = [];
   private availableProducts: string[] = [];
 
+  private static readonly PROMPTS = {
+    "check-software-status": {
+      name: "check-software-status",
+      description: "Check if a software version is still supported or has reached end-of-life",
+      arguments: [
+        {
+          name: "product",
+          description: "Software product name (e.g., python, nodejs, ubuntu)",
+          required: true
+        },
+        {
+          name: "version",
+          description: "Specific version to check (optional)",
+          required: false
+        }
+      ]
+    },
+    "analyze-eol-data": {
+      name: "analyze-eol-data",
+      description: "Analyze EOL data and provide recommendations",
+      arguments: [
+        {
+          name: "product",
+          description: "Software product name",
+          required: true
+        },
+        {
+          name: "context",
+          description: "Additional context for analysis",
+          required: false
+        }
+      ]
+    },
+    "analyze-security": {
+      name: "analyze-security",
+      description: "Analyze security vulnerabilities and EOL status",
+      arguments: [
+        {
+          name: "product",
+          description: "Software product name",
+          required: true
+        },
+        {
+          name: "version",
+          description: "Specific version to check",
+          required: true
+        },
+        {
+          name: "vendor",
+          description: "Software vendor name",
+          required: false
+        }
+      ]
+    },
+    "natural-language-query": {
+      name: "natural-language-query",
+      description: "Process natural language queries about software lifecycle status",
+      arguments: [
+        {
+          name: "query",
+          description: "The natural language query about software versions, support, or security",
+          required: true
+        }
+      ]
+    },
+    "version-comparison": {
+      name: "version-comparison",
+      description: "Compare multiple versions of software for support status and security",
+      arguments: [
+        {
+          name: "product",
+          description: "Software product name",
+          required: true
+        },
+        {
+          name: "versions",
+          description: "Comma-separated list of versions to compare",
+          required: true
+        }
+      ]
+    }
+  } as const;
+
   constructor() {
-    this.server = new Server({
+    const serverOptions: ServerOptions = {
       name: "eol-mcp-server",
-      version: "0.1.0"
-    }, {
+      version: "0.1.0",
       capabilities: {
         resources: {},
         tools: {},
         prompts: {}
       }
-    });
+    };
+
+    this.server = new Server(serverOptions);
 
     this.axiosInstance = axios.create({
       baseURL: API_CONFIG.BASE_URL,
+      headers: {
+        'accept': 'application/json',
+        'content-type': 'application/json'
+      }
+    });
+
+    this.cveAxiosInstance = axios.create({
+      baseURL: API_CONFIG.CVE_BASE_URL,
       headers: {
         'accept': 'application/json',
         'content-type': 'application/json'
@@ -95,27 +158,6 @@ class EOLServer {
     this.loadAvailableProducts().catch(console.error);
   }
 
-  private async loadAvailableProducts(): Promise<void> {
-    try {
-      const response = await this.axiosInstance.get(API_CONFIG.ENDPOINTS.ALL_PRODUCTS);
-      this.availableProducts = response.data as string[];
-    } catch (error) {
-      console.error('Failed to load available products:', error);
-      this.availableProducts = [];
-    }
-  }
-
-  private setupErrorHandling(): void {
-    this.server.onerror = (error) => {
-      console.error("[MCP Error]", error);
-    };
-
-    process.on('SIGINT', async () => {
-      await this.server.close();
-      process.exit(0);
-    });
-  }
-
   private setupHandlers(): void {
     this.setupResourceHandlers();
     this.setupToolHandlers();
@@ -123,7 +165,6 @@ class EOLServer {
   }
 
   private setupResourceHandlers(): void {
-    // List available resources (recent queries)
     this.server.setRequestHandler(
       ListResourcesRequestSchema,
       async () => ({
@@ -136,7 +177,6 @@ class EOLServer {
       })
     );
 
-    // Read specific resource
     this.server.setRequestHandler(
       ReadResourceRequestSchema,
       async (request) => {
@@ -176,7 +216,7 @@ class EOLServer {
         tools: [
           {
             name: "check_version",
-            description: "Check EOL status for a software version",
+            description: "Check EOL status for software versions",
             inputSchema: {
               type: "object",
               properties: {
@@ -186,21 +226,43 @@ class EOLServer {
                 },
                 version: {
                   type: "string",
-                  description: "Specific version to check (optional)"
+                  description: "Specific version to check"
                 }
               },
               required: ["product"]
             }
           },
           {
+            name: "check_cve",
+            description: "Scan for security vulnerabilities",
+            inputSchema: {
+              type: "object",
+              properties: {
+                product: {
+                  type: "string",
+                  description: "Software product name"
+                },
+                version: {
+                  type: "string",
+                  description: "Version to check"
+                },
+                vendor: {
+                  type: "string",
+                  description: "Software vendor (optional)"
+                }
+              },
+              required: ["product", "version"]
+            }
+          },
+          {
             name: "list_products",
-            description: "List all available products that can be checked",
+            description: "Browse available software products",
             inputSchema: {
               type: "object",
               properties: {
                 filter: {
                   type: "string",
-                  description: "Optional filter to search for specific products"
+                  description: "Optional search term"
                 }
               }
             }
@@ -212,15 +274,41 @@ class EOLServer {
     this.server.setRequestHandler(
       CallToolRequestSchema,
       async (request) => {
-        switch (request.params.name) {
+        const toolName = request.params.name;
+        const args = request.params.arguments || {};
+
+        switch (toolName) {
           case "check_version":
-            return this.handleCheckVersion(request.params.arguments);
+            if (!isValidCheckVersionArgs(args)) {
+              throw new McpError(
+                ErrorCode.InvalidParams,
+                "Invalid version check arguments"
+              );
+            }
+            return this.handleCheckVersion(args);
+
+          case "check_cve":
+            if (!isValidCVECheckArgs(args)) {
+              throw new McpError(
+                ErrorCode.InvalidParams,
+                "Invalid CVE check arguments"
+              );
+            }
+            return this.handleCheckCVE(args);
+
           case "list_products":
-            return this.handleListProducts(request.params.arguments);
+            if (!isValidListProductsArgs(args)) {
+              throw new McpError(
+                ErrorCode.InvalidParams,
+                "Invalid list products arguments"
+              );
+            }
+            return this.handleListProducts(args);
+
           default:
             throw new McpError(
               ErrorCode.MethodNotFound,
-              `Unknown tool: ${request.params.name}`
+              `Unknown tool: ${toolName}`
             );
         }
       }
@@ -228,15 +316,13 @@ class EOLServer {
   }
 
   private setupPromptHandlers(): void {
-    // List available prompts
     this.server.setRequestHandler(
       ListPromptsRequestSchema,
       async () => ({
-        prompts: Object.values(PROMPTS)
+        prompts: Object.values(EOLServer.PROMPTS)
       })
     );
 
-    // Get specific prompt
     this.server.setRequestHandler(
       GetPromptRequestSchema,
       async (request) => {
@@ -244,37 +330,76 @@ class EOLServer {
         const args = request.params.arguments || {};
 
         switch (promptName) {
-          case "check-software-status": {
-            const { product, version } = args;
+          case "natural-language-query": {
+            const { query } = args;
             return {
               messages: [
                 {
                   role: "user",
                   content: {
                     type: "text",
-                    text: `Please check the support status for ${product}${version ? ` version ${version}` : ''}.
-                    Analyze whether it's still supported, when it will reach end-of-life, and provide recommendations
-                    about upgrading if needed.`
+                    text: `I'll help you understand the software lifecycle status. Here's what I found about: ${query}
+
+First, let me check the available information about this software.
+[Using list_products tool to find relevant products]
+
+Now, I'll analyze the specific versions and their status.
+[Using check_version tool for relevant versions]
+
+If security is mentioned, I'll also check for vulnerabilities.
+[Using check_cve tool if security is relevant]
+
+I'll provide a comprehensive analysis based on all this information.`
                   }
                 }
               ]
             };
           }
 
-          case "analyze-eol-data": {
-            const { product, context } = args;
+          case "version-comparison": {
+            const { product, versions } = args;
             return {
               messages: [
                 {
                   role: "user",
                   content: {
                     type: "text",
-                    text: `Please analyze the EOL data for ${product} and provide insights about:
-                    1. Current supported versions
-                    2. Upcoming EOL dates
-                    3. Recommended upgrade paths
-                    4. Security implications
-                    ${context ? `\nAdditional context: ${context}` : ''}`
+                    text: `I'll help you compare these versions of ${product}: ${versions}
+
+For each version, I'll check:
+1. Support status and EOL dates
+2. Security vulnerabilities
+3. Recommended upgrade paths
+
+Let me analyze each version:
+[Using check_version tool for each version]
+[Using check_cve tool for each version]
+
+I'll then provide a comparison and recommendations based on:
+- Current support status
+- Upcoming EOL dates
+- Known vulnerabilities
+- Best practices for upgrades`
+                  }
+                }
+              ]
+            };
+          }
+
+          case "analyze-security": {
+            const { product, version, vendor } = args;
+            return {
+              messages: [
+                {
+                  role: "user",
+                  content: {
+                    type: "text",
+                    text: `I'll analyze the security status for ${product} version ${version}${vendor ? ` from ${vendor}` : ''}.
+Check both EOL status and CVE vulnerabilities to provide:
+1. Current support status
+2. Known vulnerabilities and their severity
+3. Security recommendations
+4. Upgrade recommendations if needed`
                   }
                 }
               ]
@@ -291,92 +416,28 @@ class EOLServer {
     );
   }
 
-  private async handleCheckVersion(args: unknown) {
-    if (!isValidCheckVersionArgs(args)) {
-      throw new McpError(
-        ErrorCode.InvalidParams,
-        "Invalid version check arguments"
-      );
-    }
-
-    const { product, version } = args;
-
-    // Validate product exists
-    if (!this.availableProducts.includes(product)) {
-      return {
-        content: [{
-          type: "text",
-          text: `Invalid product: ${product}. Use list_products tool to see available products.`
-        }],
-        isError: true
-      };
-    }
-
+  private async loadAvailableProducts(): Promise<void> {
     try {
-      const response = await this.axiosInstance.get(`/${product}.json`);
-      const cycles = response.data as EOLCycle[];
-
-      const filteredCycles = version
-        ? cycles.filter(cycle => cycle.cycle.startsWith(version))
-        : cycles;
-
-      this.recentQueries.unshift({
-        product,
-        version,
-        response: filteredCycles,
-        timestamp: new Date().toISOString()
-      });
-
-      if (this.recentQueries.length > API_CONFIG.MAX_CACHED_QUERIES) {
-        this.recentQueries.pop();
-      }
-
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify(filteredCycles, null, 2)
-        }]
-      };
+      const response = await this.axiosInstance.get(API_CONFIG.ENDPOINTS.ALL_PRODUCTS);
+      this.availableProducts = response.data as string[];
     } catch (error) {
-      if (axios.isAxiosError(error)) {
-        return {
-          content: [{
-            type: "text",
-            text: `EOL API error: ${error.response?.data?.message ?? error.message}`
-          }],
-          isError: true
-        };
-      }
-      throw error;
+      console.error('Failed to load available products:', error);
+      this.availableProducts = [];
     }
   }
 
-  private async handleListProducts(args: unknown) {
-    if (!isValidListProductsArgs(args)) {
-      throw new McpError(
-        ErrorCode.InvalidParams,
-        "Invalid list products arguments"
-      );
-    }
-
-    const { filter } = args;
-    let products = this.availableProducts;
-
-    if (filter) {
-      products = products.filter(p =>
-        p.toLowerCase().includes(filter.toLowerCase())
-      );
-    }
-
-    return {
-      content: [{
-        type: "text",
-        text: JSON.stringify(products, null, 2)
-      }]
+  private setupErrorHandling(): void {
+    this.server.onerror = (error) => {
+      console.error("[MCP Error]", error);
     };
+
+    process.on('SIGINT', async () => {
+      await this.server.close();
+      process.exit(0);
+    });
   }
 
-  async run(): Promise<void> {
+  public async start(): Promise<void> {
     const transport = new StdioServerTransport();
     await this.server.connect(transport);
     console.error("EOL MCP server running on stdio");
@@ -384,4 +445,4 @@ class EOLServer {
 }
 
 const server = new EOLServer();
-server.run().catch(console.error);
+server.start().catch(console.error);

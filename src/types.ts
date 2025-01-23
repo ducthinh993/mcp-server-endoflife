@@ -49,6 +49,7 @@ export interface CachedQuery {
   product: string;
   version?: string;
   response: EOLCycle[];
+  cveDetails?: CVEDetails[];
   timestamp: string;
 }
 
@@ -75,4 +76,32 @@ export interface PromptMessage {
 
 export interface GetPromptResult {
   messages: PromptMessage[];
+}
+
+// CVE Types
+export interface CVEDetails {
+  cve_id: string;
+  cvss_score: number;
+  summary: string;
+  published_date: string;
+  last_update: string;
+  vulnerability_type: string;
+}
+
+export interface CVECheckArgs {
+  product: string;
+  version: string;
+  vendor?: string;
+}
+
+export function isValidCVECheckArgs(args: any): args is CVECheckArgs {
+  return (
+    typeof args === "object" &&
+    args !== null &&
+    "product" in args &&
+    typeof args.product === "string" &&
+    "version" in args &&
+    typeof args.version === "string" &&
+    (args.vendor === undefined || typeof args.vendor === "string")
+  );
 }
