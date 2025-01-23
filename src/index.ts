@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { Server, ServerOptions } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   ListResourcesRequestSchema,
@@ -10,7 +10,8 @@ import {
   GetPromptRequestSchema,
   ErrorCode,
   McpError,
-  ServerOptions
+  Implementation,
+  ServerCapabilities
 } from "@modelcontextprotocol/sdk/types.js";
 import axios, { AxiosInstance } from "axios";
 import {
@@ -125,17 +126,24 @@ class EOLServer {
   } as const;
 
   constructor() {
-    const serverOptions: ServerOptions = {
+    const serverInfo: Implementation = {
       name: "eol-mcp-server",
-      version: "0.1.0",
+      version: "0.1.0"
+    };
+
+    const options = {
       capabilities: {
+        experimental: {},
+        logging: {},
+        prompts: {
+          listChanged: false
+        },
         resources: {},
-        tools: {},
-        prompts: {}
+        tools: {}
       }
     };
 
-    this.server = new Server(serverOptions);
+    this.server = new Server(serverInfo, options);
 
     this.axiosInstance = axios.create({
       baseURL: API_CONFIG.BASE_URL,
@@ -496,7 +504,7 @@ Check both EOL status and CVE vulnerabilities to provide:
     }
   }
 
-  private async handleListProducts(args: ListProductsArgs) {
+  private async handleListProducts(args: { filter?: string }) {
     const { filter } = args;
     let products = this.availableProducts;
 
