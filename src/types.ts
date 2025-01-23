@@ -105,3 +105,19 @@ export function isValidCVECheckArgs(args: any): args is CVECheckArgs {
     (args.vendor === undefined || typeof args.vendor === "string")
   );
 }
+
+export interface CompareVersionsArgs {
+  product: string;
+  version: string;
+}
+
+export function isValidCompareVersionsArgs(args: any): args is CompareVersionsArgs {
+  return (
+    typeof args === "object" &&
+    args !== null &&
+    "product" in args &&
+    typeof args.product === "string" &&
+    "version" in args &&
+    typeof args.version === "string"
+  );
+}

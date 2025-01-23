@@ -23,7 +23,9 @@ import {
   isValidListProductsArgs,
   CVECheckArgs,
   isValidCVECheckArgs,
-  CVEDetails
+  CVEDetails,
+  CompareVersionsArgs,
+  isValidCompareVersionsArgs
 } from "./types.js";
 
 const API_CONFIG = {
@@ -43,9 +45,9 @@ class EOLServer {
   private availableProducts: string[] = [];
 
   private static readonly PROMPTS = {
-    "check-software-status": {
-      name: "check-software-status",
-      description: "Check if a software version is still supported or has reached end-of-life",
+    "check_software_status": {
+      name: "check_software_status",
+      description: "Check if software versions are supported and get EOL dates",
       arguments: [
         {
           name: "product",
@@ -59,25 +61,27 @@ class EOLServer {
         }
       ]
     },
-    "analyze-eol-data": {
-      name: "analyze-eol-data",
-      description: "Analyze EOL data and provide recommendations",
+
+    "compare_versions": {
+      name: "compare_versions",
+      description: "Compare versions and analyze upgrade recommendations",
       arguments: [
         {
           name: "product",
-          description: "Software product name",
+          description: "Software product name (e.g., python, nodejs)",
           required: true
         },
         {
-          name: "context",
-          description: "Additional context for analysis",
-          required: false
+          name: "version",
+          description: "Current version being used",
+          required: true
         }
       ]
     },
-    "analyze-security": {
-      name: "analyze-security",
-      description: "Analyze security vulnerabilities and EOL status",
+
+    "analyze_security": {
+      name: "analyze_security",
+      description: "Comprehensive security analysis including EOL status and vulnerabilities",
       arguments: [
         {
           name: "product",
@@ -86,39 +90,19 @@ class EOLServer {
         },
         {
           name: "version",
-          description: "Specific version to check",
+          description: "Version to analyze",
           required: true
-        },
-        {
-          name: "vendor",
-          description: "Software vendor name",
-          required: false
         }
       ]
     },
-    "natural-language-query": {
-      name: "natural-language-query",
-      description: "Process natural language queries about software lifecycle status",
+
+    "natural_language_query": {
+      name: "natural_language_query",
+      description: "Process natural language queries about software lifecycle",
       arguments: [
         {
           name: "query",
-          description: "The natural language query about software versions, support, or security",
-          required: true
-        }
-      ]
-    },
-    "version-comparison": {
-      name: "version-comparison",
-      description: "Compare multiple versions of software for support status and security",
-      arguments: [
-        {
-          name: "product",
-          description: "Software product name",
-          required: true
-        },
-        {
-          name: "versions",
-          description: "Comma-separated list of versions to compare",
+          description: "Natural language question about software versions, support, or security",
           required: true
         }
       ]
@@ -224,17 +208,19 @@ class EOLServer {
         tools: [
           {
             name: "check_version",
-            description: "Check EOL status for software versions",
+            description: "Check EOL status and support information for software versions",
             inputSchema: {
               type: "object",
               properties: {
                 product: {
                   type: "string",
-                  description: "Software product name (e.g., python, nodejs, ubuntu)"
+                  description: "Software product name (e.g., python, nodejs, ubuntu)",
+                  examples: ["python", "nodejs", "ubuntu"]
                 },
                 version: {
                   type: "string",
-                  description: "Specific version to check"
+                  description: "Specific version to check (e.g., 3.8, 16, 20.04)",
+                  examples: ["3.8", "16", "20.04"]
                 }
               },
               required: ["product"]
@@ -242,21 +228,24 @@ class EOLServer {
           },
           {
             name: "check_cve",
-            description: "Scan for security vulnerabilities",
+            description: "Scan for known security vulnerabilities and support status",
             inputSchema: {
               type: "object",
               properties: {
                 product: {
                   type: "string",
-                  description: "Software product name"
+                  description: "Software product name",
+                  examples: ["python", "nodejs"]
                 },
                 version: {
                   type: "string",
-                  description: "Version to check"
+                  description: "Version to check for vulnerabilities",
+                  examples: ["3.8.0", "16.13.0"]
                 },
                 vendor: {
                   type: "string",
-                  description: "Software vendor (optional)"
+                  description: "Software vendor (optional)",
+                  examples: ["canonical", "redhat"]
                 }
               },
               required: ["product", "version"]
@@ -264,15 +253,36 @@ class EOLServer {
           },
           {
             name: "list_products",
-            description: "Browse available software products",
+            description: "Browse or search available software products",
             inputSchema: {
               type: "object",
               properties: {
                 filter: {
                   type: "string",
-                  description: "Optional search term"
+                  description: "Optional search term to filter products",
+                  examples: ["python", "linux", "database"]
                 }
               }
+            }
+          },
+          {
+            name: "compare_versions",
+            description: "Compare versions and get detailed upgrade analysis",
+            inputSchema: {
+              type: "object",
+              properties: {
+                product: {
+                  type: "string",
+                  description: "Software product name (e.g., python, nodejs)",
+                  examples: ["python", "nodejs"]
+                },
+                version: {
+                  type: "string",
+                  description: "Current version being used",
+                  examples: ["3.8", "16"]
+                }
+              },
+              required: ["product", "version"]
             }
           }
         ]
@@ -313,6 +323,95 @@ class EOLServer {
             }
             return this.handleListProducts(args);
 
+          case "compare_versions": {
+            if (!isValidCompareVersionsArgs(args)) {
+              throw new McpError(
+                ErrorCode.InvalidParams,
+                "Invalid version comparison arguments"
+              );
+            }
+
+            const { product, version } = args;
+
+            // Validate product exists
+            if (!this.availableProducts.includes(product)) {
+              return {
+                content: [{
+                  type: "text",
+                  text: `Invalid product: ${product}. Use list_products tool to see available products.`
+                }],
+                isError: true
+              };
+            }
+
+            try {
+              const response = await this.axiosInstance.get(`/${product}.json`);
+              const cycles = response.data as EOLCycle[];
+
+              const currentCycle = cycles.find(c => c.cycle.startsWith(version));
+              if (!currentCycle) {
+                return {
+                  content: [{
+                    type: "text",
+                    text: `Version ${version} not found for ${product}`
+                  }],
+                  isError: true
+                };
+              }
+
+              const latestCycle = cycles[0];
+
+              // Cache the query
+              this.recentQueries.unshift({
+                product,
+                version,
+                response: [currentCycle, latestCycle],
+                timestamp: new Date().toISOString()
+              });
+
+              if (this.recentQueries.length > API_CONFIG.MAX_CACHED_QUERIES) {
+                this.recentQueries.pop();
+              }
+
+              return {
+                content: [{
+                  type: "text",
+                  text: JSON.stringify({
+                    current: {
+                      version: currentCycle.cycle,
+                      latest_patch: currentCycle.latest,
+                      eol: currentCycle.eol,
+                      support: currentCycle.support || "No support information"
+                    },
+                    latest: {
+                      version: latestCycle.cycle,
+                      latest_patch: latestCycle.latest,
+                      eol: latestCycle.eol,
+                      support: latestCycle.support || "No support information"
+                    },
+                    analysis: {
+                      is_latest: currentCycle.cycle === latestCycle.cycle,
+                      needs_update: currentCycle.cycle !== latestCycle.cycle,
+                      support_status: currentCycle.support ? "supported" : "unsupported",
+                      time_to_eol: new Date(currentCycle.eol).getTime() - new Date().getTime()
+                    }
+                  }, null, 2)
+                }]
+              };
+            } catch (error) {
+              if (axios.isAxiosError(error)) {
+                return {
+                  content: [{
+                    type: "text",
+                    text: `API error: ${error.response?.data?.message ?? error.message}`
+                  }],
+                  isError: true
+                };
+              }
+              throw error;
+            }
+          }
+
           default:
             throw new McpError(
               ErrorCode.MethodNotFound,
@@ -338,7 +437,7 @@ class EOLServer {
         const args = request.params.arguments || {};
 
         switch (promptName) {
-          case "natural-language-query": {
+          case "natural_language_query": {
             const { query } = args;
             return {
               messages: [
@@ -348,61 +447,100 @@ class EOLServer {
                     type: "text",
                     text: `I'll help you understand the software lifecycle status. Here's what I found about: ${query}
 
-First, let me check the available information about this software.
-[Using list_products tool to find relevant products]
+Available tools and their capabilities:
 
-Now, I'll analyze the specific versions and their status.
-[Using check_version tool for relevant versions]
+1. check_version:
+   Input: product (required), version (optional)
+   Output: EOL dates, support status, latest patches
+   Example: check_version(product="python", version="3.8")
 
-If security is mentioned, I'll also check for vulnerabilities.
-[Using check_cve tool if security is relevant]
+2. list_products:
+   Input: filter (optional)
+   Output: List of available products
+   Example: list_products(filter="python")
 
-I'll provide a comprehensive analysis based on all this information.`
+3. check_cve:
+   Input: product, version, vendor (optional)
+   Output: Security status and vulnerabilities
+   Example: check_cve(product="python", version="3.8")
+
+4. compare_versions:
+   Input: product, version
+   Output: Detailed version comparison
+   Example: compare_versions(product="python", version="3.8")
+
+Analysis steps:
+1. First, I'll identify the software and versions in your query
+2. Then, I'll check the available information using appropriate tools
+3. Finally, I'll provide a comprehensive analysis
+
+Let me help you with that query...`
                   }
                 }
               ]
             };
           }
 
-          case "version-comparison": {
-            const { product, versions } = args;
+          case "compare_versions": {
+            const { product, version } = args;
             return {
               messages: [
                 {
                   role: "user",
                   content: {
                     type: "text",
-                    text: `I'll help you compare these versions of ${product}: ${versions}
+                    text: `I'll help analyze ${product} version ${version} and provide upgrade recommendations.
 
-For each version, I'll check:
-1. Support status and EOL dates
-2. Security vulnerabilities
-3. Recommended upgrade paths
+Available tools and their capabilities:
+1. check_version:
+   - Get EOL dates
+   - Check support status
+   - Find latest patch versions
+   - View LTS information
 
-Let me analyze each version:
-[Using check_version tool for each version]
-[Using check_cve tool for each version]
+2. list_products:
+   - Verify product names
+   - Browse available software
+   - Search with filters
 
-I'll then provide a comparison and recommendations based on:
-- Current support status
-- Upcoming EOL dates
-- Known vulnerabilities
-- Best practices for upgrades`
+3. check_cve:
+   - Security vulnerability scans
+   - Support status verification
+   - Security recommendations
+
+Analysis workflow:
+1. Verify product and check current version:
+[Using check_version with product=${product}, version=${version}]
+
+2. Get latest version details:
+[Using check_version with product=${product}]
+
+3. Analyze security implications:
+[Using check_cve with product=${product}, version=${version}]
+
+I will provide:
+✓ Version comparison (current vs latest)
+✓ Support status analysis
+✓ Security assessment
+✓ Specific upgrade recommendations
+✓ Timeline for required updates
+
+Let me start the analysis...`
                   }
                 }
               ]
             };
           }
 
-          case "analyze-security": {
-            const { product, version, vendor } = args;
+          case "analyze_security": {
+            const { product, version } = args;
             return {
               messages: [
                 {
                   role: "user",
                   content: {
                     type: "text",
-                    text: `I'll analyze the security status for ${product} version ${version}${vendor ? ` from ${vendor}` : ''}.
+                    text: `I'll analyze the security status for ${product} version ${version}.
 Check both EOL status and CVE vulnerabilities to provide:
 1. Current support status
 2. Known vulnerabilities and their severity
