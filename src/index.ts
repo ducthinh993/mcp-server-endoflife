@@ -25,7 +25,12 @@ import {
   isValidCVECheckArgs,
   CVEDetails,
   CompareVersionsArgs,
-  isValidCompareVersionsArgs
+  isValidCompareVersionsArgs,
+  ValidationResult,
+  VersionValidation,
+  ValidationsResult,
+  GetAllDetailsArgs,
+  isValidGetAllDetailsArgs
 } from "./types.js";
 
 const API_CONFIG = {
@@ -106,7 +111,77 @@ class EOLServer {
           required: true
         }
       ]
+    },
+
+    "validate_version": {
+      name: "validate_version",
+      description: "Validate version recommendations before responding",
+      arguments: [
+        {
+          name: "product",
+          description: "Software product name",
+          required: true
+        },
+        {
+          name: "versions",
+          description: "List of versions to validate",
+          required: true
+        }
+      ]
     }
+  } as const;
+
+  private static readonly PROMPT_TEMPLATES = {
+    VERSION_VALIDATION: (currentDate: string) => [
+      "2. VERSION VALIDATION:",
+      "   a. Get All Versions:",
+      "      [Using get_all_details]",
+      "      - Get complete version history",
+      "      - Check all EOL dates",
+      "      - Verify support status",
+      "",
+      "   b. Version Analysis:",
+      "      [Using check_version]",
+      "      - Validate specific version",
+      "      - Check latest patches",
+      "      - Verify LTS status",
+      "",
+      "   c. Security Check:",
+      "      [Using check_cve]",
+      "      - Check vulnerabilities",
+      "      - Verify security patches",
+      "      - Validate support"
+    ].join("\n"),
+
+    RESPONSE_HEADER: (currentDate: string) => [
+      "VALIDATION REQUIREMENTS:",
+      `1. Current date: ${currentDate}`,
+      ""
+    ].join("\n"),
+
+    RESPONSE_FORMAT: (currentDate: string) => [
+      "3. RESPONSE FORMAT:",
+      "   ```",
+      `   Current date: ${currentDate}`,
+      "",
+      "   Version Analysis:",
+      "   1. Current Version:",
+      "      - EOL Check: YYYY-MM-DD ({valid|invalid}, {+/-N} days)",
+      "      - Support: {active|inactive}",
+      "      - Security: {supported|unsupported}",
+      "",
+      "   2. Latest Available:",
+      "      - Version: X.Y.Z",
+      "      - EOL Date: YYYY-MM-DD",
+      "      - Support: {active|inactive}",
+      "      - LTS: {yes|no}",
+      "",
+      "   Recommendation:",
+      "      - Upgrade Status: {required|optional|none}",
+      "      - Urgency: {critical|high|medium|low}",
+      "      - Timeline: {immediate|planned|none}",
+      "   ```"
+    ].join("\n")
   } as const;
 
   constructor() {
@@ -284,6 +359,21 @@ class EOLServer {
               },
               required: ["product", "version"]
             }
+          },
+          {
+            name: "get_all_details",
+            description: "Get comprehensive lifecycle details for all versions of a product",
+            inputSchema: {
+              type: "object",
+              properties: {
+                product: {
+                  type: "string",
+                  description: "Software product name (e.g., python, nodejs)",
+                  examples: ["python", "nodejs"]
+                }
+              },
+              required: ["product"]
+            }
           }
         ]
       })
@@ -331,85 +421,17 @@ class EOLServer {
               );
             }
 
-            const { product, version } = args;
+            return this.handleCompareVersions(args);
+          }
 
-            // Validate product exists
-            if (!this.availableProducts.includes(product)) {
-              return {
-                content: [{
-                  type: "text",
-                  text: `Invalid product: ${product}. Use list_products tool to see available products.`
-                }],
-                isError: true
-              };
+          case "get_all_details": {
+            if (!isValidGetAllDetailsArgs(args)) {
+              throw new McpError(
+                ErrorCode.InvalidParams,
+                "Invalid get all details arguments"
+              );
             }
-
-            try {
-              const response = await this.axiosInstance.get(`/${product}.json`);
-              const cycles = response.data as EOLCycle[];
-
-              const currentCycle = cycles.find(c => c.cycle.startsWith(version));
-              if (!currentCycle) {
-                return {
-                  content: [{
-                    type: "text",
-                    text: `Version ${version} not found for ${product}`
-                  }],
-                  isError: true
-                };
-              }
-
-              const latestCycle = cycles[0];
-
-              // Cache the query
-              this.recentQueries.unshift({
-                product,
-                version,
-                response: [currentCycle, latestCycle],
-                timestamp: new Date().toISOString()
-              });
-
-              if (this.recentQueries.length > API_CONFIG.MAX_CACHED_QUERIES) {
-                this.recentQueries.pop();
-              }
-
-              return {
-                content: [{
-                  type: "text",
-                  text: JSON.stringify({
-                    current: {
-                      version: currentCycle.cycle,
-                      latest_patch: currentCycle.latest,
-                      eol: currentCycle.eol,
-                      support: currentCycle.support || "No support information"
-                    },
-                    latest: {
-                      version: latestCycle.cycle,
-                      latest_patch: latestCycle.latest,
-                      eol: latestCycle.eol,
-                      support: latestCycle.support || "No support information"
-                    },
-                    analysis: {
-                      is_latest: currentCycle.cycle === latestCycle.cycle,
-                      needs_update: currentCycle.cycle !== latestCycle.cycle,
-                      support_status: currentCycle.support ? "supported" : "unsupported",
-                      time_to_eol: new Date(currentCycle.eol).getTime() - new Date().getTime()
-                    }
-                  }, null, 2)
-                }]
-              };
-            } catch (error) {
-              if (axios.isAxiosError(error)) {
-                return {
-                  content: [{
-                    type: "text",
-                    text: `API error: ${error.response?.data?.message ?? error.message}`
-                  }],
-                  isError: true
-                };
-              }
-              throw error;
-            }
+            return this.handleGetAllDetails(args);
           }
 
           default:
@@ -435,120 +457,116 @@ class EOLServer {
       async (request) => {
         const promptName = request.params.name;
         const args = request.params.arguments || {};
+        const currentDate = new Date().toISOString();
 
         switch (promptName) {
-          case "natural_language_query": {
-            const { query } = args;
+          case "check_software_status": {
+            const { product, version } = args;
             return {
-              messages: [
-                {
-                  role: "user",
-                  content: {
-                    type: "text",
-                    text: `I'll help you understand the software lifecycle status. Here's what I found about: ${query}
-
-Available tools and their capabilities:
-
-1. check_version:
-   Input: product (required), version (optional)
-   Output: EOL dates, support status, latest patches
-   Example: check_version(product="python", version="3.8")
-
-2. list_products:
-   Input: filter (optional)
-   Output: List of available products
-   Example: list_products(filter="python")
-
-3. check_cve:
-   Input: product, version, vendor (optional)
-   Output: Security status and vulnerabilities
-   Example: check_cve(product="python", version="3.8")
-
-4. compare_versions:
-   Input: product, version
-   Output: Detailed version comparison
-   Example: compare_versions(product="python", version="3.8")
-
-Analysis steps:
-1. First, I'll identify the software and versions in your query
-2. Then, I'll check the available information using appropriate tools
-3. Finally, I'll provide a comprehensive analysis
-
-Let me help you with that query...`
-                  }
+              messages: [{
+                role: "user",
+                content: {
+                  type: "text",
+                  text: [
+                    `I'll analyze the software lifecycle status for ${product}${version ? ` version ${version}` : ''}.`,
+                    "",
+                    EOLServer.PROMPT_TEMPLATES.RESPONSE_HEADER(currentDate),
+                    EOLServer.PROMPT_TEMPLATES.VERSION_VALIDATION(currentDate),
+                    "",
+                    EOLServer.PROMPT_TEMPLATES.RESPONSE_FORMAT(currentDate),
+                    "",
+                    "Let me validate the version status..."
+                  ].join("\n")
                 }
-              ]
+              }]
             };
           }
 
           case "compare_versions": {
             const { product, version } = args;
             return {
-              messages: [
-                {
-                  role: "user",
-                  content: {
-                    type: "text",
-                    text: `I'll help analyze ${product} version ${version} and provide upgrade recommendations.
-
-Available tools and their capabilities:
-1. check_version:
-   - Get EOL dates
-   - Check support status
-   - Find latest patch versions
-   - View LTS information
-
-2. list_products:
-   - Verify product names
-   - Browse available software
-   - Search with filters
-
-3. check_cve:
-   - Security vulnerability scans
-   - Support status verification
-   - Security recommendations
-
-Analysis workflow:
-1. Verify product and check current version:
-[Using check_version with product=${product}, version=${version}]
-
-2. Get latest version details:
-[Using check_version with product=${product}]
-
-3. Analyze security implications:
-[Using check_cve with product=${product}, version=${version}]
-
-I will provide:
-✓ Version comparison (current vs latest)
-✓ Support status analysis
-✓ Security assessment
-✓ Specific upgrade recommendations
-✓ Timeline for required updates
-
-Let me start the analysis...`
-                  }
+              messages: [{
+                role: "user",
+                content: {
+                  type: "text",
+                  text: [
+                    `I'll analyze ${product} version ${version} and provide upgrade recommendations.`,
+                    "",
+                    EOLServer.PROMPT_TEMPLATES.RESPONSE_HEADER(currentDate),
+                    EOLServer.PROMPT_TEMPLATES.VERSION_VALIDATION(currentDate),
+                    "",
+                    EOLServer.PROMPT_TEMPLATES.RESPONSE_FORMAT(currentDate),
+                    "",
+                    "Let me analyze the versions..."
+                  ].join("\n")
                 }
-              ]
+              }]
             };
           }
 
           case "analyze_security": {
             const { product, version } = args;
             return {
-              messages: [
-                {
-                  role: "user",
-                  content: {
-                    type: "text",
-                    text: `I'll analyze the security status for ${product} version ${version}.
-Check both EOL status and CVE vulnerabilities to provide:
-1. Current support status
-2. Known vulnerabilities and their severity
-3. Security recommendations
-4. Upgrade recommendations if needed`
-                  }
+              messages: [{
+                role: "user",
+                content: {
+                  type: "text",
+                  text: [
+                    `I'll analyze security status for ${product} version ${version}.`,
+                    "",
+                    EOLServer.PROMPT_TEMPLATES.RESPONSE_HEADER(currentDate),
+                    EOLServer.PROMPT_TEMPLATES.VERSION_VALIDATION(currentDate),
+                    "",
+                    EOLServer.PROMPT_TEMPLATES.RESPONSE_FORMAT(currentDate),
+                    "",
+                    "Let me analyze the security status..."
+                  ].join("\n")
                 }
-              ]
+              }]
+            };
+          }
+
+          case "validate_version": {
+            const { product, versions } = args;
+            return {
+              messages: [{
+                role: "user",
+                content: {
+                  type: "text",
+                  text: [
+                    `I'll validate ${product} versions: ${Array.isArray(versions) ? versions.join(", ") : versions}`,
+                    "",
+                    EOLServer.PROMPT_TEMPLATES.RESPONSE_HEADER(currentDate),
+                    EOLServer.PROMPT_TEMPLATES.VERSION_VALIDATION(currentDate),
+                    "",
+                    EOLServer.PROMPT_TEMPLATES.RESPONSE_FORMAT(currentDate),
+                    "",
+                    "Let me validate each version..."
+                  ].join("\n")
+                }
+              }]
+            };
+          }
+
+          case "natural_language_query": {
+            const { query } = args;
+            return {
+              messages: [{
+                role: "user",
+                content: {
+                  type: "text",
+                  text: [
+                    `I'll help analyze software lifecycle information. Here's what I found about: ${query}`,
+                    "",
+                    EOLServer.PROMPT_TEMPLATES.RESPONSE_HEADER(currentDate),
+                    EOLServer.PROMPT_TEMPLATES.VERSION_VALIDATION(currentDate),
+                    "",
+                    EOLServer.PROMPT_TEMPLATES.RESPONSE_FORMAT(currentDate),
+                    "",
+                    "Let me analyze your query..."
+                  ].join("\n")
+                }
+              }]
             };
           }
 
@@ -688,6 +706,250 @@ Check both EOL status and CVE vulnerabilities to provide:
             vendor,
             cycle: matchingCycle,
             securityStatus: matchingCycle.support ? 'supported' : 'unsupported'
+          }, null, 2)
+        }]
+      };
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        return {
+          content: [{
+            type: "text",
+            text: `API error: ${error.response?.data?.message ?? error.message}`
+          }],
+          isError: true
+        };
+      }
+      throw error;
+    }
+  }
+
+  private async handleCompareVersions(args: CompareVersionsArgs) {
+    const { product, version } = args;
+
+    // Validate product exists
+    if (!this.availableProducts.includes(product)) {
+      return {
+        content: [{
+          type: "text",
+          text: `Invalid product: ${product}. Use list_products tool to see available products.`
+        }],
+        isError: true
+      };
+    }
+
+    try {
+      const cycles = await this.getProductDetails(product);
+      const currentDate = new Date();
+
+      // Validate current version
+      const currentCycle = cycles.find(c => c?.cycle?.startsWith(version));
+      if (!currentCycle) {
+        return {
+          content: [{
+            type: "text",
+            text: `Version ${version} not found for ${product}`
+          }],
+          isError: true
+        };
+      }
+
+      // Find and validate latest supported version
+      const latestSupportedCycle = cycles.find(c => {
+        const validation = this.validateVersion(c, currentDate);
+        return validation.isValid && validation.isSupported;
+      }) || cycles[0];
+
+      // Validate both versions
+      const currentValidation = this.validateVersion(currentCycle, currentDate);
+      const latestValidation = this.validateVersion(latestSupportedCycle, currentDate);
+
+      // Cache the query
+      this.recentQueries.unshift({
+        product,
+        version,
+        response: [currentCycle, latestSupportedCycle],
+        timestamp: currentDate.toISOString()
+      });
+
+      if (this.recentQueries.length > API_CONFIG.MAX_CACHED_QUERIES) {
+        this.recentQueries.pop();
+      }
+
+      const response = {
+        current_date: currentDate.toISOString(),
+        validations: {
+          current: this.formatVersionValidation(currentCycle, currentValidation),
+          latest: this.formatVersionValidation(latestSupportedCycle, latestValidation)
+        },
+        recommendation: {
+          needs_update: !currentValidation.isValid || !currentValidation.isSupported,
+          urgency: this.getUpgradeUrgency(currentValidation.daysToEol),
+          message: this.getRecommendationMessage(currentValidation)
+        }
+      };
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify(response, null, 2)
+        }]
+      };
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        return {
+          content: [{
+            type: "text",
+            text: `API error: ${error.response?.data?.message ?? error.message}`
+          }],
+          isError: true
+        };
+      }
+      throw error;
+    }
+  }
+
+  private formatVersionValidation(cycle: EOLCycle, validation: ValidationResult) {
+    return {
+      version: cycle.cycle,
+      eol_check: {
+        date: cycle.eol,
+        valid: validation.isValid,
+        days_remaining: validation.daysToEol,
+        message: validation.validationMessage
+      },
+      support: {
+        status: validation.isSupported ? "supported" : "not supported",
+        lts: this.isValueTruthy(cycle.lts) ? "LTS" : "not LTS"
+      }
+    };
+  }
+
+  private getUpgradeUrgency(daysToEol: number): string {
+    if (daysToEol < 0) return "critical";
+    if (daysToEol < 30) return "high";
+    if (daysToEol < 90) return "medium";
+    return "low";
+  }
+
+  private getRecommendationMessage(validation: ValidationResult): string {
+    return validation.isSupported && validation.isValid
+      ? "Current version is supported, but consider upgrading to latest for security updates"
+      : "Current version needs urgent upgrade - use a supported version";
+  }
+
+  // Helper function to check if a value is truthy
+  private isValueTruthy(value: string | boolean | undefined): boolean {
+    if (typeof value === "boolean") return value;
+    if (typeof value === "string") {
+      const lowered = value.toLowerCase();
+      return lowered === "true" || lowered === "yes";
+    }
+    return false;
+  }
+
+  private async getProductDetails(product: string): Promise<EOLCycle[]> {
+    const response = await this.axiosInstance.get(`/${product}.json`);
+    return response.data as EOLCycle[];
+  }
+
+  private validateVersion(cycle: EOLCycle | undefined, currentDate: Date = new Date()): ValidationResult {
+    if (!cycle?.eol) {
+      return {
+        isValid: false,
+        daysToEol: 0,
+        isSupported: false,
+        validationMessage: `Invalid cycle data for version ${cycle?.cycle ?? 'unknown'}`
+      };
+    }
+
+    const eolDate = new Date(cycle.eol);
+    const daysToEol = Math.floor((eolDate.getTime() - currentDate.getTime()) / (1000 * 60 * 60 * 24));
+    const isSupported = this.isValueTruthy(cycle.support);
+
+    return {
+      isValid: daysToEol > 0,
+      daysToEol,
+      isSupported,
+      validationMessage: `Version ${cycle.cycle} EOL date ${cycle.eol} is ${daysToEol > 0 ? 'valid' : 'invalid'}, ${daysToEol > 0 ? '+' : ''}${daysToEol} days from now`
+    };
+  }
+
+  private async validateVersions(product: string, versions: string[]): Promise<ValidationsResult> {
+    const cycles = await this.getProductDetails(product);
+    const currentDate = new Date();
+    const validations: Record<string, VersionValidation> = {};
+    const validVersions: string[] = [];
+
+    for (const version of versions) {
+      const cycle = cycles.find(c => c?.cycle?.startsWith(version));
+      if (!cycle) continue;
+
+      const validation = this.validateVersion(cycle, currentDate);
+      const securityCheck = await this.handleCheckCVE({ product, version });
+
+      validations[version] = {
+        eol: {
+          date: cycle.eol,
+          valid: validation.isValid,
+          daysRemaining: validation.daysToEol,
+          message: validation.validationMessage
+        },
+        support: {
+          isSupported: validation.isSupported,
+          message: `Version ${version} support status: ${validation.isSupported ? 'active' : 'inactive'}`
+        },
+        security: {
+          isSupported: !cycle.eol || new Date(cycle.eol) > currentDate,
+          message: `Version ${version} security status: ${!cycle.eol || new Date(cycle.eol) > currentDate ? 'supported' : 'unsupported'}`
+        }
+      };
+
+      if (validation.isValid && validation.isSupported) {
+        validVersions.push(version);
+      }
+    }
+
+    return { validations, validVersions };
+  }
+
+  private async handleGetAllDetails(args: GetAllDetailsArgs) {
+    const { product } = args;
+
+    if (!this.availableProducts.includes(product)) {
+      return {
+        content: [{
+          type: "text",
+          text: `Invalid product: ${product}. Use list_products tool to see available products.`
+        }],
+        isError: true
+      };
+    }
+
+    try {
+      const cycles = await this.getProductDetails(product);
+      const currentDate = new Date();
+
+      // Add validation results for each cycle
+      const detailedCycles = cycles.map(cycle => {
+        const validation = this.validateVersion(cycle, currentDate);
+        return {
+          ...cycle,
+          validation: {
+            is_valid: validation.isValid,
+            days_to_eol: validation.daysToEol,
+            is_supported: validation.isSupported,
+            message: validation.validationMessage
+          }
+        };
+      });
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            product,
+            current_date: currentDate.toISOString(),
+            cycles: detailedCycles
           }, null, 2)
         }]
       };

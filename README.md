@@ -18,42 +18,123 @@ The EOL MCP server:
 
 ## Features ✨
 
-### 1. EOL Status Checking
-- Get support status for specific versions
-- View end-of-life dates
-- Check LTS (Long Term Support) information
-- Monitor support cycles
+### Core Functionality
+- Real-time EOL date validation
+- Version support status checking
+- Security vulnerability analysis
+- Comprehensive version comparison
+- Natural language query processing
+- Detailed lifecycle validation
 
-### 2. Security Analysis
-- CVE vulnerability scanning
-- Security status assessment
-- CVSS score evaluation
-- Vulnerability type identification
+### Tools
+1. `check_version`
+   - Get EOL dates and support status
+   - Check latest patch versions
+   - Verify LTS status
+   - Validate support timeline
 
-## Tools and Prompts 🛠️
+2. `get_all_details` (New!)
+   - Get comprehensive lifecycle details
+   - View all version cycles
+   - Check support timeline
+   - Get validation results
+   - Calculate remaining support days
 
-### Available Tools
+3. `compare_versions`
+   - Compare current vs latest versions
+   - Get upgrade recommendations
+   - Check compatibility
+   - Assess upgrade urgency
+   - Validate upgrade paths
 
-1. **check_version**
-   - Purpose: Check EOL status for software versions
-   - Example: "Is Python 3.8 still supported?"
-   - Arguments:
-     - product: Software name
-     - version: Version to check
+4. `check_cve`
+   - Security vulnerability scanning
+   - Support status verification
+   - Security patch validation
+   - Vendor support checking
 
-2. **check_cve**
-   - Purpose: Scan for security vulnerabilities
-   - Example: "Are there any CVEs for Node.js 16?"
-   - Arguments:
-     - product: Software name
-     - version: Version to check
-     - vendor: Software vendor (optional)
+5. `list_products`
+   - Browse available software
+   - Search with filters
+   - Verify product names
+   - Get product details
 
-3. **list_products**
-   - Purpose: Browse available software products
-   - Example: "Show me all Linux distributions"
-   - Arguments:
-     - filter: Optional search term
+### Prompts
+1. `check_software_status`
+   - Validate version support
+   - Check EOL dates
+   - Get security status
+
+2. `compare_versions`
+   - Analyze version differences
+   - Get upgrade recommendations
+   - Check compatibility
+
+3. `analyze_security`
+   - Security vulnerability analysis
+   - Support status check
+   - Patch verification
+
+4. `natural_language_query`
+   - Process natural language questions
+   - Get contextual responses
+   - Smart version detection
+
+5. `validate_version`
+   - Validate version recommendations
+   - Check support status
+   - Verify security implications
+
+### Response Examples
+
+#### Version Validation
+```json
+{
+  "current_date": "2024-02-20T00:00:00.000Z",
+  "validations": {
+    "current": {
+      "version": "1.20",
+      "eol_check": {
+        "date": "2024-02-06",
+        "valid": false,
+        "days_remaining": -14,
+        "message": "Version 1.20 EOL date 2024-02-06 is invalid, -14 days from now"
+      },
+      "support": {
+        "status": "not supported",
+        "lts": "not LTS"
+      }
+    }
+  },
+  "recommendation": {
+    "needs_update": true,
+    "urgency": "critical",
+    "message": "Current version needs urgent upgrade - use a supported version"
+  }
+}
+```
+
+#### All Details Response (New!)
+```json
+{
+  "product": "go",
+  "current_date": "2024-02-20T00:00:00.000Z",
+  "cycles": [
+    {
+      "cycle": "1.22",
+      "releaseDate": "2024-02-06",
+      "eol": "2025-02-06",
+      "latest": "1.22.0",
+      "validation": {
+        "is_valid": true,
+        "days_to_eol": 351,
+        "is_supported": true,
+        "message": "Version 1.22 EOL date 2025-02-06 is valid, +351 days from now"
+      }
+    }
+  ]
+}
+```
 
 ## Example Conversations 💬
 
