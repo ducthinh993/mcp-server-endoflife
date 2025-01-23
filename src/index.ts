@@ -494,6 +494,7 @@ class EOLServer {
                     "",
                     EOLServer.PROMPT_TEMPLATES.RESPONSE_HEADER(currentDate),
                     EOLServer.PROMPT_TEMPLATES.VERSION_VALIDATION(currentDate),
+                    "",
                     EOLServer.PROMPT_TEMPLATES.RESPONSE_FORMAT(currentDate),
                     "",
                     "Let me analyze the versions..."
@@ -515,6 +516,7 @@ class EOLServer {
                     "",
                     EOLServer.PROMPT_TEMPLATES.RESPONSE_HEADER(currentDate),
                     EOLServer.PROMPT_TEMPLATES.VERSION_VALIDATION(currentDate),
+                    "",
                     EOLServer.PROMPT_TEMPLATES.RESPONSE_FORMAT(currentDate),
                     "",
                     "Let me analyze the security status..."
@@ -536,6 +538,7 @@ class EOLServer {
                     "",
                     EOLServer.PROMPT_TEMPLATES.RESPONSE_HEADER(currentDate),
                     EOLServer.PROMPT_TEMPLATES.VERSION_VALIDATION(currentDate),
+                    "",
                     EOLServer.PROMPT_TEMPLATES.RESPONSE_FORMAT(currentDate),
                     "",
                     "Let me validate each version..."
@@ -557,6 +560,7 @@ class EOLServer {
                     "",
                     EOLServer.PROMPT_TEMPLATES.RESPONSE_HEADER(currentDate),
                     EOLServer.PROMPT_TEMPLATES.VERSION_VALIDATION(currentDate),
+                    "",
                     EOLServer.PROMPT_TEMPLATES.RESPONSE_FORMAT(currentDate),
                     "",
                     "Let me analyze your query..."
