@@ -4,9 +4,9 @@ export interface EOLCycle {
   releaseDate: string;
   eol: string;
   latest: string;
-  lts?: string;
-  support?: string;
-  discontinued?: string;
+  support?: string | boolean;
+  lts?: string | boolean;
+  link?: string;
 }
 
 export interface ProductInfo {
@@ -119,5 +119,50 @@ export function isValidCompareVersionsArgs(args: any): args is CompareVersionsAr
     typeof args.product === "string" &&
     "version" in args &&
     typeof args.version === "string"
+  );
+}
+
+// Validation Types
+export interface ValidationResult {
+  isValid: boolean;
+  daysToEol: number;
+  isSupported: boolean;
+  validationMessage: string;
+}
+
+export interface VersionValidation {
+  eol: {
+    date: string;
+    valid: boolean;
+    daysRemaining: number;
+    message: string;
+  };
+  support: {
+    isSupported: boolean;
+    message: string;
+  };
+  security: {
+    isSupported: boolean;
+    message: string;
+  };
+}
+
+export interface ValidationsResult {
+  validations: Record<string, VersionValidation>;
+  validVersions: string[];
+}
+
+// Add GetAllDetailsArgs interface
+export interface GetAllDetailsArgs {
+  product: string;
+}
+
+// Add type guard for GetAllDetailsArgs
+export function isValidGetAllDetailsArgs(args: any): args is GetAllDetailsArgs {
+  return (
+    typeof args === "object" &&
+    args !== null &&
+    "product" in args &&
+    typeof args.product === "string"
   );
 }
