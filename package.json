@@ -2,6 +2,7 @@
   "name": "eol-mcp-server",
   "version": "0.1.0",
   "description": "A Model Context Protocol server that checks software end-of-life status using endoflife.date API",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "bin": {
@@ -14,7 +15,10 @@
     "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
     "prepare": "npm run build",
     "watch": "tsc --watch",
-    "inspector": "npx @modelcontextprotocol/inspector build/index.js"
+    "inspector": "npx @modelcontextprotocol/inspector build/index.js",
+    "security-scan": "npm audit && snyk test",
+    "lint:security": "eslint . --config .eslintrc.security.js",
+    "precommit": "npm run lint && npm run security-scan"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^0.6.0",
@@ -22,6 +26,10 @@
   },
   "devDependencies": {
     "@types/node": "^20.11.24",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "eslint-plugin-security": "^2.0.0",
+    "snyk": "^1.0.0"
   }
 }

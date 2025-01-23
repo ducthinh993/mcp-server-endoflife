@@ -442,6 +442,122 @@ Check both EOL status and CVE vulnerabilities to provide:
     await this.server.connect(transport);
     console.error("EOL MCP server running on stdio");
   }
+
+  private async handleCheckVersion(args: CheckVersionArgs) {
+    const { product, version } = args;
+
+    // Validate product exists
+    if (!this.availableProducts.includes(product)) {
+      return {
+        content: [{
+          type: "text",
+          text: `Invalid product: ${product}. Use list_products tool to see available products.`
+        }],
+        isError: true
+      };
+    }
+
+    try {
+      const response = await this.axiosInstance.get(`/${product}.json`);
+      const cycles = response.data as EOLCycle[];
+
+      const filteredCycles = version
+        ? cycles.filter(cycle => cycle.cycle.startsWith(version))
+        : cycles;
+
+      this.recentQueries.unshift({
+        product,
+        version,
+        response: filteredCycles,
+        timestamp: new Date().toISOString()
+      });
+
+      if (this.recentQueries.length > API_CONFIG.MAX_CACHED_QUERIES) {
+        this.recentQueries.pop();
+      }
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify(filteredCycles, null, 2)
+        }]
+      };
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        return {
+          content: [{
+            type: "text",
+            text: `EOL API error: ${error.response?.data?.message ?? error.message}`
+          }],
+          isError: true
+        };
+      }
+      throw error;
+    }
+  }
+
+  private async handleListProducts(args: ListProductsArgs) {
+    const { filter } = args;
+    let products = this.availableProducts;
+
+    if (filter) {
+      products = products.filter(p =>
+        p.toLowerCase().includes(filter.toLowerCase())
+      );
+    }
+
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify(products, null, 2)
+      }]
+    };
+  }
+
+  private async handleCheckCVE(args: CVECheckArgs) {
+    const { product, version, vendor } = args;
+
+    try {
+      const response = await this.axiosInstance.get(`/${product}.json`);
+      const cycles = response.data as EOLCycle[];
+
+      const matchingCycle = cycles.find(cycle => cycle.cycle.startsWith(version));
+      if (!matchingCycle) {
+        return {
+          content: [{
+            type: "text",
+            text: `Version ${version} not found for ${product}`
+          }],
+          isError: true
+        };
+      }
+
+      // For now, return basic EOL info since we removed Snyk
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            product,
+            version,
+            vendor,
+            cycle: matchingCycle,
+            securityStatus: matchingCycle.support ? 'supported' : 'unsupported'
+          }, null, 2)
+        }]
+      };
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        return {
+          content: [{
+            type: "text",
+            text: `API error: ${error.response?.data?.message ?? error.message}`
+          }],
+          isError: true
+        };
+      }
+      throw error;
+    }
+  }
 }
 
 const server = new EOLServer();
