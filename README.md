@@ -2,6 +2,8 @@
 
 A Model Context Protocol (MCP) server that enables AI assistants like Claude to check software end-of-life (EOL) dates and support status using the endoflife.date API. This helps AI models provide accurate information about software lifecycle and security status in real-time.
 
+<a href="https://glama.ai/mcp/servers/5392xs0e78"><img width="380" height="200" src="https://glama.ai/mcp/servers/5392xs0e78/badge" alt="EOL Server MCP server" /></a>
+
 ## What is MCP? 🤔
 
 The Model Context Protocol (MCP) is a system that lets AI apps, like Claude Desktop, connect to external tools and data sources. It provides a standardized way for AI assistants to work with local services and APIs while keeping the user in control.
